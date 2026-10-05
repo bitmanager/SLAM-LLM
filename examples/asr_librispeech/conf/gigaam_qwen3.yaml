@@ -1,0 +1,24 @@
+model_config:
+  encoder_name: gigaam
+  encoder_path: ${oc.env:GIGAAM_CHECKPOINT}
+  encoder_dim: 768
+  encoder_projector_ds_rate: 2
+  llm_name: Qwen3-4B-Instruct-2507
+  llm_path: ${oc.env:QWEN_MODEL_PATH}
+  llm_dim: 2560
+dataset_config:
+  train_data_path: ${oc.env:ASR_DATA_DIR}/train.jsonl
+  val_data_path: ${oc.env:ASR_DATA_DIR}/val.jsonl
+  audio_length_from_manifest: true
+  prompt: "Распознай речь. Выведи только точную расшифровку записи, без пояснений и повторов."
+train_config:
+  model_name: gigaam-qwen3-projector
+  enable_deepspeed: true
+  freeze_encoder: true
+  freeze_llm: true
+  batching_strategy: custom
+  validation_interval: 100
+  output_dir: ${oc.env:ASR_OUTPUT_DIR}
+log_config:
+  log_file: ${oc.env:ASR_OUTPUT_DIR}/train.log
+deepspeed_config: examples/asr_librispeech/conf/ds_gigaam_bf16.json

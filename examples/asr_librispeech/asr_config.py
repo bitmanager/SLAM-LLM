@@ -96,6 +96,7 @@ class DataConfig:
     max_words: Optional[int] = None
     max_mel: Optional[float] = None
     fix_length_audio: int = -1
+    audio_length_from_manifest: bool = False
     inference_mode:bool = False
     input_type: str = field(default="raw", metadata={
                                 "help":"Use raw when input is wav, mel when for whisper"

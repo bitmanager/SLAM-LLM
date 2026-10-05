@@ -100,6 +100,15 @@ def main(kwargs: DictConfig):
 	model, tokenizer = model_factory(train_config, model_config, **kwargs)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # FIX(MZY): put the whole model to device.
 	model.to(device)
+	if fsdp_config.pure_bf16:
+		model.llm.to(dtype=torch.bfloat16)
+		model.llm.config.dtype = torch.bfloat16
+		model.encoder_projector.to(dtype=torch.bfloat16)
+	if train_config.use_fast_kernels:
+		if device.type != "cuda" or next(model.llm.parameters()).dtype not in (torch.float16, torch.bfloat16):
+			raise ValueError("FlashAttention inference requires CUDA and FP16/BF16 LLM weights")
+		model.llm.set_attn_implementation("flash_attention_2")
+	logger.info("Inference LLM dtype=%s attention=%s", next(model.llm.parameters()).dtype, model.llm.config._attn_implementation)
 	model.eval()
 
 	# dataset_config = generate_dataset_config(train_config, kwargs)

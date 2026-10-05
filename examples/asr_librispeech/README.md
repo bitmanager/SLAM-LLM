@@ -57,13 +57,51 @@ The model accepts mono 16 kHz waveforms `[B, samples]` and an `audio_mask`
 with 1 for valid samples and 0 for right padding. For the linear projector,
 each sample's audio placeholder count must be
 `encoder.get_output_lengths(sample_lengths) // encoder_projector_ds_rate`.
-This uses GigaAM's actual frame geometry. **The existing raw-waveform dataset's
-hardcoded WavLM lengths are not compatible.** This change supplies the encoder
-connection only, not a GigaAM dataset conversion or a complete training recipe;
-mismatched placeholder counts raise an error rather than silently truncating
-features. Feature extraction calls the original `GigaAM.forward()` directly,
+This uses GigaAM's actual frame geometry. **The default raw-waveform dataset's
+hardcoded WavLM lengths are not compatible.** Enable
+`dataset_config.audio_length_from_manifest=true` and provide each record's
+`audio_length` after encoder/projector downsampling. Missing or invalid lengths
+fail immediately; the model also checks them against actual encoder output.
+Feature extraction calls the original `GigaAM.forward()` directly,
 including its CUDA FP16 autocast. The adapter only converts SLAM's padding mask
 to lengths and GigaAM's output layout/mask to the projector's interface.
+
+#### FLEURS projector-only example
+
+`prepare_fleurs_gigaam.py` converts a local FLEURS train parquet to the existing
+JSONL format, adding only audio placeholder lengths calculated by GigaAM. It
+requires PyArrow and a verified parquet SHA256. It preserves original WAV bytes
+and groups recordings by source ID into deterministic training/validation splits.
+The internal holdout is not the official FLEURS test set.
+
+```bash
+export GIGAAM_CHECKPOINT=/models/gigaam.ckpt
+export QWEN_MODEL_PATH=/models/Qwen3-4B-Instruct-2507
+export ASR_DATA_DIR=/data/fleurs-slam
+export ASR_OUTPUT_DIR=/runs/gigaam-qwen3
+python examples/asr_librispeech/prepare_fleurs_gigaam.py \
+  --parquet /data/fleurs-train.parquet --sha256 "$FLEURS_SHA256" \
+  --encoder-path "$GIGAAM_CHECKPOINT" --output "$ASR_DATA_DIR"
+python -m torch.distributed.run --standalone --nproc_per_node=1 \
+  examples/asr_librispeech/deepspeed_finetune_asr.py \
+  --config-path conf --config-name gigaam_qwen3
+```
+
+This uses the unchanged SLAM DeepSpeed training loop, collator, loss and checkpoint
+export. The config trains the existing 8.39M-parameter projector, freezing GigaAM
+and Qwen3-4B-Instruct-2507. Qwen/projector use BF16 through DeepSpeed autocast;
+GigaAM retains its native FP16 encoder autocast. DeepSpeed's Torch Adam avoids
+building a custom optimizer kernel. The recipe expects a 768-wide GigaAM encoder;
+adjust `encoder_dim` for other checkpoints. Trainer validation reports
+teacher-forced loss/accuracy, not autoregressive transcription WER.
+
+For the stock batch inference entrypoint, explicitly set
+`++fsdp_config.pure_bf16=true ++train_config.use_fast_kernels=true`.
+DeepSpeed training precision does not carry over to inference. These existing
+flags cast the LLM/projector to BF16 and select Transformers' FlashAttention 2
+implementation, leaving GigaAM's native FP16 path unchanged. FlashAttention
+requires a compatible installed build and fails on unsupported hardware/dtypes;
+there is no fallback. The checkpoint, prompt and beam-search settings are unchanged.
 
 ### Use whisper as the encoder
 ```
