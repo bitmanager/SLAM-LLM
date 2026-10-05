@@ -46,6 +46,13 @@ attention type. This flag initializes the encoder in FP16, not BF16; subsequent
 precision changes belong to the trainer. The loader requires CUDA and does
 not silently fall back to CPU. Small unit tests instantiate modules directly.
 
+A GPU smoke test on RTX PRO 6000 Blackwell passed with PyTorch/Torchaudio
+2.9.0+cu130, Torchvision 0.24.0+cu130 and the official FlashAttention 2.8.3
+wheel for cu13/torch2.9/Python 3.12. It used a native GigaAM checkpoint,
+BF16 projector and a tiny frozen Qwen2: encoder output matched upstream and
+backward produced finite gradients only for the projector. This verifies
+integration, not ASR quality or a complete training run.
+
 The model accepts mono 16 kHz waveforms `[B, samples]` and an `audio_mask`
 with 1 for valid samples and 0 for right padding. For the linear projector,
 each sample's audio placeholder count must be
