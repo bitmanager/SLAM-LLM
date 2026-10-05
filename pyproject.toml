@@ -16,6 +16,7 @@ classifiers = [
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
+gigaam = ["gigaam @ git+https://github.com/salute-developers/GigaAM.git@7447938d791c4f3e643386ee22c33777004293a5"]
 vllm = ["vllm"]
 tests = ["pytest-mock"]
 auditnlg = ["auditnlg"]
@@ -34,3 +35,6 @@ packages = ["src/slam_llm"]
 
 [tool.hatch.metadata.hooks.requirements_txt]
 files = ["requirements.txt"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

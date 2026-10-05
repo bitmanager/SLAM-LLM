@@ -89,6 +89,9 @@ def setup_encoder(train_config, model_config, **kwargs):
         if encoder_name == "wavlm":
             from slam_llm.models.encoder import WavLMEncoder
             encoder = WavLMEncoder.load(model_config)
+        if encoder_name == "gigaam":
+            from slam_llm.models.encoder import GigaAMEncoder
+            encoder = GigaAMEncoder.load(model_config)
         if encoder_name == "av_hubert":
             from slam_llm.models.encoder import AVHubertEncoder
             encoder = AVHubertEncoder.load(model_config)
@@ -332,6 +335,18 @@ class slam_model(nn.Module):
                 encoder_outs = self.encoder(audio) # output: [bs, seq_len=3+512, dim=768]
             if self.model_config.encoder_name == "wavlm":
                 encoder_outs = self.encoder.extract_features(audio, 1 - audio_mask) #(FIX:MZY): 1-audio_mask is needed for wavlm as the padding mask
+            if self.model_config.encoder_name == "gigaam":
+                encoder_outs, audio_mel_post_mask = self.encoder.extract_features(
+                    audio, ~audio_mask.bool() if audio_mask is not None else None
+                )
+                encoder_outs = encoder_outs.to(next(self.encoder_projector.parameters()).dtype)
+                if modality_mask is not None and self.model_config.encoder_projector in ("linear", "cov1d-linear"):
+                    expected = audio_mel_post_mask.sum(dim=1) // self.model_config.encoder_projector_ds_rate
+                    if not torch.equal(modality_mask.sum(dim=1), expected):
+                        raise ValueError(
+                            "GigaAM audio placeholders must match encoder output lengths // "
+                            "encoder_projector_ds_rate; the WavLM dataset length formula is incompatible"
+                        )
             if self.model_config.encoder_name == "hubert":
                 results = self.encoder(source = audio, padding_mask = 1-audio_mask)
                 if self.model_config.encoder_type == "pretrain":

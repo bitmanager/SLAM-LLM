@@ -29,6 +29,27 @@ Modify the path including `speech_encoder_path`, `llm_path`, `output_dir`, `ckpt
 
 ## Train a new model
 
+### GigaAM encoder integration
+
+Install the optional dependency with `pip install -e '.[gigaam]'` and set
+`model_config.encoder_name=gigaam`, `model_config.encoder_path` to a local
+GigaAM `.ckpt` (or an upstream model name), and `model_config.encoder_dim` to
+the checkpoint's encoder width. The adapter keeps the original preprocessor
+and acoustic encoder; it does not retain the RNNT/CTC head. The existing
+`freeze_encoder=true`, `freeze_llm=true` and `encoder_projector=linear` settings
+leave only SLAM's existing projector trainable.
+
+The model accepts mono 16 kHz waveforms `[B, samples]` and an `audio_mask`
+with 1 for valid samples and 0 for right padding. For the linear projector,
+each sample's audio placeholder count must be
+`encoder.get_output_lengths(sample_lengths) // encoder_projector_ds_rate`.
+This uses GigaAM's actual frame geometry. **The existing raw-waveform dataset's
+hardcoded WavLM lengths are not compatible.** This change supplies the encoder
+connection only, not a GigaAM dataset conversion or a complete training recipe;
+mismatched placeholder counts raise an error rather than silently truncating
+features. Feature extraction follows the caller's precision/autocast context
+instead of the GigaAM ASR convenience method's forced CUDA FP16 context.
+
 ### Use whisper as the encoder
 ```
 bash finetune_whisper_large_linear_vicuna_7b.sh

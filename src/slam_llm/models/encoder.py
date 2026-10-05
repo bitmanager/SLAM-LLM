@@ -126,6 +126,62 @@ class WavLMEncoder(nn.Module):
     def extract_features(self, source, padding_mask):
         return self.model.extract_features(source, padding_mask)[0]
 
+
+class GigaAMEncoder(nn.Module):
+    """Adapt GigaAM's acoustic encoder to SLAM; the ASR head is not retained.
+
+    Input is right-padded mono 16 kHz waveforms. Output is [B, T, D] and
+    a boolean mask with True for valid encoder frames. Requires `gigaam`.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self.preprocessor = model.preprocessor
+        self.encoder = model.encoder
+
+    @classmethod
+    def load(cls, model_config):
+        import gigaam
+
+        model = gigaam.load_model(
+            model_config.encoder_path, device="cpu",
+            fp16_encoder=False, use_flash=False,
+        )
+        return cls(model)
+
+    def get_output_lengths(self, sample_lengths):
+        """Use the checkpoint's frame geometry, not a fixed frame-rate guess.
+
+        For the existing concat projector, audio placeholder counts are these
+        lengths // encoder_projector_ds_rate. Dataset construction is separate.
+        """
+        mel_lengths = self.preprocessor.out_len(sample_lengths)
+        return self.encoder.pre_encode.calc_output_length(mel_lengths)
+
+    def extract_features(self, source, padding_mask=None):
+        if source.ndim != 2:
+            raise ValueError("GigaAM expects mono 16 kHz audio shaped [batch, samples]")
+        if padding_mask is None:
+            lengths = torch.full(
+                (source.size(0),), source.size(1), device=source.device, dtype=torch.long
+            )
+        else:
+            padding_mask = padding_mask.to(device=source.device, dtype=torch.bool)
+            if padding_mask.shape != source.shape:
+                raise ValueError("GigaAM audio padding mask must match the waveform shape")
+            lengths = (~padding_mask).sum(dim=1)
+            expected = torch.arange(source.size(1), device=source.device)[None] >= lengths[:, None]
+            if not torch.equal(padding_mask, expected):
+                raise ValueError("GigaAM requires right-padded audio")
+            source = source.masked_fill(padding_mask, 0)
+        if torch.any(lengths == 0):
+            raise ValueError("GigaAM requires nonempty audio")
+        features, feature_lengths = self.preprocessor(source, lengths)
+        features = features.to(dtype=next(self.encoder.parameters()).dtype)
+        encoded, encoded_lengths = self.encoder(features, feature_lengths)
+        valid = torch.arange(encoded.size(2), device=encoded.device)[None] < encoded_lengths[:, None]
+        return encoded.transpose(1, 2).masked_fill(~valid[..., None], 0), valid
+
 class AVHubertEncoder:
 
     @classmethod
