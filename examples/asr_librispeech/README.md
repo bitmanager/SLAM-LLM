@@ -39,6 +39,13 @@ and acoustic encoder; it does not retain the RNNT/CTC head. The existing
 `freeze_encoder=true`, `freeze_llm=true` and `encoder_projector=linear` settings
 leave only SLAM's existing projector trainable.
 
+On CUDA, the checkpoint loads onto the current rank's GPU with
+`fp16_encoder=True` and `use_flash=True`. Install a compatible upstream
+`flash-attn` build; GigaAM must support Flash Attention for the checkpoint's
+attention type. This flag initializes the encoder in FP16, not BF16; subsequent
+precision changes belong to the trainer. The loader requires CUDA and does
+not silently fall back to CPU. Small unit tests instantiate modules directly.
+
 The model accepts mono 16 kHz waveforms `[B, samples]` and an `audio_mask`
 with 1 for valid samples and 0 for right padding. For the linear projector,
 each sample's audio placeholder count must be
@@ -47,8 +54,9 @@ This uses GigaAM's actual frame geometry. **The existing raw-waveform dataset's
 hardcoded WavLM lengths are not compatible.** This change supplies the encoder
 connection only, not a GigaAM dataset conversion or a complete training recipe;
 mismatched placeholder counts raise an error rather than silently truncating
-features. Feature extraction follows the caller's precision/autocast context
-instead of the GigaAM ASR convenience method's forced CUDA FP16 context.
+features. Feature extraction calls the original `GigaAM.forward()` directly,
+including its CUDA FP16 autocast. The adapter only converts SLAM's padding mask
+to lengths and GigaAM's output layout/mask to the projector's interface.
 
 ### Use whisper as the encoder
 ```

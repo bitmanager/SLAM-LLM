@@ -54,26 +54,10 @@ def test_padding_is_optional(acoustic_model):
     assert valid.all()
 
 
-@pytest.mark.parametrize("kind", ["empty", "left_padding", "wrong_shape", "stereo"])
-def test_invalid_input_is_rejected(acoustic_model, kind):
-    encoder = GigaAMEncoder(acoustic_model)
-    audio = torch.zeros(1, 1600)
-    mask = torch.zeros_like(audio, dtype=torch.bool)
-    if kind == "empty":
-        mask[:] = True
-    elif kind == "left_padding":
-        mask[:, :800] = True
-    elif kind == "wrong_shape":
-        mask = mask[:, :-1]
-    else:
-        audio = audio.unsqueeze(1)
-    with pytest.raises(ValueError):
-        encoder.extract_features(audio, mask)
-
-
 def test_loader_uses_native_checkpoint_api_and_drops_asr_head(acoustic_model, monkeypatch):
     calls = []
     acoustic_model.head = torch.nn.Linear(32, 4)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
 
     def load(path, **kwargs):
         calls.append((path, kwargs))
@@ -85,10 +69,11 @@ def test_loader_uses_native_checkpoint_api_and_drops_asr_head(acoustic_model, mo
         SimpleNamespace(encoder_name="gigaam", encoder_path="/models/local.ckpt"),
     )
     assert calls == [("/models/local.ckpt", {
-        "device": "cpu", "fp16_encoder": False, "use_flash": False,
+        "device": torch.device("cuda:2"),
+        "fp16_encoder": True, "use_flash": True,
     })]
     assert not any(p.requires_grad for p in encoder.parameters())
-    assert not any(name.startswith("head.") for name in encoder.state_dict())
+    assert not hasattr(encoder.model, "head")
 
 
 @pytest.mark.parametrize("wrong_slots", [False, True])

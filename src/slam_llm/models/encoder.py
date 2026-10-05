@@ -136,16 +136,19 @@ class GigaAMEncoder(nn.Module):
 
     def __init__(self, model):
         super().__init__()
-        self.preprocessor = model.preprocessor
-        self.encoder = model.encoder
+        self.model = model
+        if hasattr(self.model, "head"):
+            del self.model.head
 
     @classmethod
     def load(cls, model_config):
         import gigaam
 
+        # Load on the rank's GPU: GigaAM disables Flash Attention on CPU.
+        device = torch.device("cuda", torch.cuda.current_device())
         model = gigaam.load_model(
-            model_config.encoder_path, device="cpu",
-            fp16_encoder=False, use_flash=False,
+            model_config.encoder_path, device=device,
+            fp16_encoder=True, use_flash=True,
         )
         return cls(model)
 
@@ -155,30 +158,18 @@ class GigaAMEncoder(nn.Module):
         For the existing concat projector, audio placeholder counts are these
         lengths // encoder_projector_ds_rate. Dataset construction is separate.
         """
-        mel_lengths = self.preprocessor.out_len(sample_lengths)
-        return self.encoder.pre_encode.calc_output_length(mel_lengths)
+        mel_lengths = self.model.preprocessor.out_len(sample_lengths)
+        return self.model.encoder.pre_encode.calc_output_length(mel_lengths)
 
     def extract_features(self, source, padding_mask=None):
-        if source.ndim != 2:
-            raise ValueError("GigaAM expects mono 16 kHz audio shaped [batch, samples]")
         if padding_mask is None:
             lengths = torch.full(
                 (source.size(0),), source.size(1), device=source.device, dtype=torch.long
             )
         else:
-            padding_mask = padding_mask.to(device=source.device, dtype=torch.bool)
-            if padding_mask.shape != source.shape:
-                raise ValueError("GigaAM audio padding mask must match the waveform shape")
             lengths = (~padding_mask).sum(dim=1)
-            expected = torch.arange(source.size(1), device=source.device)[None] >= lengths[:, None]
-            if not torch.equal(padding_mask, expected):
-                raise ValueError("GigaAM requires right-padded audio")
             source = source.masked_fill(padding_mask, 0)
-        if torch.any(lengths == 0):
-            raise ValueError("GigaAM requires nonempty audio")
-        features, feature_lengths = self.preprocessor(source, lengths)
-        features = features.to(dtype=next(self.encoder.parameters()).dtype)
-        encoded, encoded_lengths = self.encoder(features, feature_lengths)
+        encoded, encoded_lengths = self.model(source, lengths)
         valid = torch.arange(encoded.size(2), device=encoded.device)[None] < encoded_lengths[:, None]
         return encoded.transpose(1, 2).masked_fill(~valid[..., None], 0), valid
 
