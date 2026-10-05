@@ -95,6 +95,14 @@ building a custom optimizer kernel. The recipe expects a 768-wide GigaAM encoder
 adjust `encoder_dim` for other checkpoints. Trainer validation reports
 teacher-forced loss/accuracy, not autoregressive transcription WER.
 
+For the stock batch inference entrypoint, explicitly set
+`++fsdp_config.pure_bf16=true ++train_config.use_fast_kernels=true`.
+DeepSpeed training precision does not carry over to inference. These existing
+flags cast the LLM/projector to BF16 and select Transformers' FlashAttention 2
+implementation, leaving GigaAM's native FP16 path unchanged. FlashAttention
+requires a compatible installed build and fails on unsupported hardware/dtypes;
+there is no fallback. The checkpoint, prompt and beam-search settings are unchanged.
+
 ### Use whisper as the encoder
 ```
 bash finetune_whisper_large_linear_vicuna_7b.sh
