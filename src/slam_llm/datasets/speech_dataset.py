@@ -50,6 +50,9 @@ class SpeechDatasetJsonl(torch.utils.data.Dataset):
         self.normalize = dataset_config.get("normalize", False)
         self.input_type = dataset_config.get("input_type", None)
         assert self.input_type in ["raw", "mel"], "input_type must be one of [raw, mel]" 
+        self.audio_length_from_manifest = dataset_config.get("audio_length_from_manifest", False)
+        if self.audio_length_from_manifest and (self.input_type != "raw" or self.fix_length_audio > 0):
+            raise ValueError("Manifest audio lengths require raw input and no fixed-length override")
 
         self.data_list = []
         if split == "train":
@@ -106,6 +109,10 @@ class SpeechDatasetJsonl(torch.utils.data.Dataset):
             # audio_length = calculate_output_length_1d(audio_length, 5, 5, 0) # ad-hoc for 5x cov1d downsample
         if self.fix_length_audio > 0:
             audio_length = self.fix_length_audio
+        if self.audio_length_from_manifest:
+            audio_length = data_dict["audio_length"]
+            if type(audio_length) is not int or audio_length <= 0:
+                raise ValueError("audio_length must be a positive integer after encoder and projector downsampling")
         audio_pseudo = torch.full((audio_length,), -1) # placeholder
 
         prompt = self.prompt
